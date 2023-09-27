@@ -41,7 +41,7 @@ def convert_sam_rec_to_gff3_rec(r, source, qid_index_dict=None, allow_non_primar
         return None
     t_len = sum(e.end-e.start for e in r.segments)
  
-    if not allow_non_primary and r.flag.is_supplementary:
+    if not allow_non_primary and r.flag.is_secondary:
         return None
 
     seq = Seq('A'*t_len)  # DO NOT CARE since sequence is not written in GFF3
@@ -53,9 +53,15 @@ def convert_sam_rec_to_gff3_rec(r, source, qid_index_dict=None, allow_non_primar
     matches = r.num_mat_or_sub - r.num_nonmatches
 
  
-    if qid_index_dict is not None and allow_non_primary and r.flag.is_supplementary:
+    if qid_index_dict is not None and allow_non_primary:
         qid_index_dict[r.qID] += 1
-        r.qID += '_dup' + str(qid_index_dict[r.qID])
+        if r.flag.is_supplementary:
+            r.qID += '_sup' + str(qid_index_dict[r.qID])
+        elif r.flag.is_secondary:
+            r.qID += '_sec' + str(qid_index_dict[r.qID])
+        else:
+            r.qID += '_unk' + str(qid_index_dict[r.qID])
+
 
     gene_qualifiers = {"source": source, "ID": r.qID, "Name": r.qID} # for gene record
 #    mRNA_qualifiers = {"source": source, "ID": r.qID+'.mRNA', "Name": r.qID+'.mRNA', "Parent": r.qID,
