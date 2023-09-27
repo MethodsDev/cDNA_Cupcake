@@ -30,6 +30,89 @@ from Bio.SeqRecord import SeqRecord
 from Bio.SeqFeature import SeqFeature, FeatureLocation
 from cupcake.io.BioReaders import  GMAPSAMReader
 
+
+
+
+class GFF3Writer_fromSAM:
+    """Write GFF3 files starting with standard Biopython objects.
+    """
+    def __init__(self):
+        pass
+
+    # not sure how useful for this case?
+    def _clean_feature(self, feature):
+        quals = {}
+        for key, val in feature.qualifiers.items():
+            if not isinstance(val, (list, tuple)):
+                val = [val]
+            val = [str(x) for x in val]
+            quals[key] = val
+        feature.qualifiers = quals
+        # Support for Biopython 1.68 and above, which removed sub_features
+        if not hasattr(feature, "sub_features"):
+            feature.sub_features = []
+        clean_sub = [self._clean_feature(f) for f in feature.sub_features]
+        feature.sub_features = clean_sub
+        return feature
+
+    def _get_phase(self, feature):
+        if "phase" in feature.qualifiers:
+            phase = feature.qualifiers["phase"][0]
+        elif feature.type == "CDS":
+            phase = int(feature.qualifiers.get("codon_start", [1])[0]) - 1
+        else:
+            phase = "."
+        return str(phase)
+
+
+    def _write_feature(self, feature, rec_id, out_handle, parent_id=None):
+        """Write a feature with location information.
+        """
+        if feature.strand == 1:
+            strand = '+'
+        elif feature.strand == -1:
+            strand = '-'
+        else:
+            strand = '.'
+
+        if parent_id:
+            attributes = parent_id
+        else:
+            attributes = 'transcript_id "' + feature.qualifiers.get("ID")[0] + '";'
+        parent_id = attributes
+
+        if feature.type:
+            if feature.type == "gene":
+                ftype = "transcript"
+                attributes += ' gene_id "' + feature.qualifiers.get("ID")[0] + '"'
+            else:
+                ftype = feature.type # "exon" for this application
+        else:
+            ftype = "sequence_feature"
+
+        parts = [str(rec_id),
+                 feature.qualifiers.get("source", ["feature"])[0],
+                 ftype,
+                 str(feature.location.nofuzzy_start + 1), # 1-based indexing
+                 str(feature.location.nofuzzy_end),
+                 feature.qualifiers.get("score", ["."])[0],
+                 strand,
+                 self._get_phase(feature),
+                 attributes]
+
+        out_handle.write("\t".join(parts) + "\n")
+        for sub_feature in feature.sub_features:
+            self._write_feature(sub_feature, rec_id, out_handle, parent_id)
+        return
+
+
+    def write(self, rec, out_handle):
+        for sf in rec.features:
+            sf = self._clean_feature(sf)
+            self._write_feature(sf, rec.id, out_handle)
+
+
+
 def convert_sam_rec_to_gff3_rec(r, source, qid_index_dict=None, allow_non_primary=True):
     """
     :param r: GMAPSAMRecord record
@@ -84,11 +167,12 @@ def convert_sam_rec_to_gff3_rec(r, source, qid_index_dict=None, allow_non_primar
 
 def convert_sam_to_gff3(sam_filename, output_gff3, source, q_dict=None, allow_non_primary=True):
     qid_index_dict = Counter()
+    writer = GFF3Writer_fromSAM()
     with open(output_gff3, 'w') as f:
         for r0 in GMAPSAMReader(sam_filename, True, query_len_dict=q_dict):
             rec = convert_sam_rec_to_gff3_rec(r0, source, qid_index_dict, allow_non_primary)
             if rec is not None:
-                BCBio_GFF.write([rec], f)
+                writer.write(rec, f)
 
 def main():
     from argparse import ArgumentParser
